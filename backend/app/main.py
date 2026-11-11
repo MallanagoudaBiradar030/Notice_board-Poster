@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -51,6 +52,7 @@ class CalendarEvent(BaseModel):
     end_time: str | None = None
     venue: str = Field(default="", max_length=300)
     description: str = Field(default="", max_length=5000)
+    registration_deadline: date | None = None
 
 
 def azure_read_document(content: bytes) -> dict[str, Any]:
@@ -99,44 +101,62 @@ def get_ocr_text(result: dict[str, Any]) -> tuple[str, int]:
 
 
 def extract_event_fields(text: str) -> dict[str, Any]:
-    lines = [re.sub(r"\s+", " ", line).strip(" •|:-") for line in text.splitlines()]
-    lines = [line for line in lines if line]
-    title = next((line for line in lines if len(line) >= 4), "")
-    venue = ""
-    for line in lines:
-        if re.search(r"\b(venue|location|place|hall|auditorium|room)\b", line, re.I):
-            venue = re.sub(r"^(venue|location|place)\s*[:\-]?\s*", "", line, flags=re.I)
-            break
+    """Use the existing Foundry prompt agent to turn OCR text into structured event data."""
+    endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").rstrip("/")
+    agent_name = os.getenv("FOUNDRY_AGENT_NAME", "chatgpt4mini")
+    api_key = os.getenv("FOUNDRY_API_KEY", "")
+    if not endpoint or not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Microsoft Foundry is not configured. Set FOUNDRY_PROJECT_ENDPOINT and FOUNDRY_API_KEY.",
+        )
 
-    found_date = None
-    for pattern in DATE_PATTERNS:
-        match = re.search(pattern, text, re.I)
-        if match:
-            try:
-                found_date = date_parser.parse(match.group(0), dayfirst=True, fuzzy=False).date()
-                break
-            except (ValueError, OverflowError):
-                pass
+    today = date.today().isoformat()
+    instructions = f"""Extract event details from the OCR text below.
+Today's date is {today}. Return ONLY one valid JSON object with these keys:
+title, event_date, start_time, end_time, venue, description, registration_deadline, needs_review, review_notes.
+Use ISO dates (YYYY-MM-DD) and 24-hour times (HH:MM). Use null for any missing or ambiguous date/time/deadline.
+Do not guess or invent details. Relative dates such as 'next Friday' must remain unresolved: set event_date to null and explain in review_notes.
+Set needs_review=true if any important field is missing or ambiguous. registration_deadline must be null if not explicitly stated.
+OCR TEXT:
+{text[:12000]}"""
 
-    times = []
-    for match in TIME_PATTERN.finditer(text):
-        raw = match.group(0).upper().replace(" ", "")
-        try:
-            parsed = datetime.strptime(raw, "%I:%M%p") if "AM" in raw or "PM" in raw else datetime.strptime(raw, "%H:%M")
-            times.append(parsed.strftime("%H:%M"))
-        except ValueError:
-            continue
+    url = f"{endpoint}/agents/{agent_name}/endpoint/protocols/openai/responses"
+    try:
+        response = requests.post(
+            url,
+            params={"api-version": "v1"},
+            headers={"api-key": api_key, "Content-Type": "application/json"},
+            json={"input": instructions, "stream": False},
+            timeout=90,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        detail = "Foundry agent request failed."
+        if getattr(exc, "response", None) is not None:
+            detail += f" HTTP {exc.response.status_code}: {exc.response.text[:500]}"
+        raise HTTPException(status_code=502, detail=detail) from exc
 
-    return {
-        "title": title[:200],
-        "event_date": found_date.isoformat() if found_date else None,
-        "start_time": times[0] if times else None,
-        "end_time": times[1] if len(times) > 1 else None,
-        "venue": venue[:300],
-        "description": text[:5000],
-        "needs_review": not (title and found_date),
-        "note": "These fields are heuristic suggestions. Review and correct them before adding the event to your calendar.",
-    }
+    output = payload.get("output_text", "")
+    if not output:
+        for item in payload.get("output", []):
+            for content in item.get("content", []):
+                if content.get("type") in {"output_text", "text"}:
+                    output += content.get("text", "")
+    try:
+        clean = output.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r"^\`\`\`(?:json)?\\s*|\\s*\`\`\`$", "", clean, flags=re.I)
+        event = json.loads(clean)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="Foundry agent returned invalid JSON. Check the agent instructions and try again.") from exc
+
+    allowed = {"title", "event_date", "start_time", "end_time", "venue", "description", "registration_deadline", "needs_review", "review_notes"}
+    event = {key: event.get(key) for key in allowed}
+    event.setdefault("needs_review", True)
+    event.setdefault("review_notes", [])
+    return event
 
 
 def ics_escape(value: str) -> str:
