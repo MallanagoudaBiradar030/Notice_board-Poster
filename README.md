@@ -6,7 +6,9 @@ A student hackathon project that converts college notice-board posters into revi
 
 - Azure AI Document Intelligence OCR for poster/PDF text extraction.
 - FastAPI backend.
-- Rule-based extraction suggestions for title, date, time and venue (no generative model required).
+- Existing Microsoft Foundry `chatgpt4mini` prompt agent converts OCR text into structured event details.
+- Missing or ambiguous values are flagged for manual review; relative dates are not silently guessed.
+- Editable registration deadline field.
 - Browser interface to upload a poster and edit the extracted event.
 - Downloadable iCalendar (.ics) file for Google Calendar, Outlook and other calendar apps.
 - API documentation at `/docs`, health endpoint at `/health`.
@@ -23,11 +25,19 @@ py -3 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
-# Edit .env with your Azure Document Intelligence endpoint and newly regenerated key.
+# Configure Azure OCR and Foundry values in backend/.env. Never commit secrets.
 uvicorn app.main:app --reload
 ```
 
 Open http://127.0.0.1:8000
+
+## Required environment variables
+
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`
+- `AZURE_DOCUMENT_INTELLIGENCE_KEY`
+- `FOUNDRY_PROJECT_ENDPOINT` (your Foundry project endpoint)
+- `FOUNDRY_AGENT_NAME` (`chatgpt4mini`)
+- `FOUNDRY_API_KEY` (store securely; never commit it)
 
 ## Important
 

@@ -33,6 +33,7 @@
       <div><label for="venue">Venue</label><input id="venue" maxlength="300"></div>
       <div><label for="start_time">Start time</label><input id="start_time" type="time"></div>
       <div><label for="end_time">End time</label><input id="end_time" type="time"></div>
+      <div><label for="registration_deadline">Registration deadline</label><input id="registration_deadline" type="date"></div>
     </div>
     <label for="description">Description</label><textarea id="description" maxlength="5000"></textarea>
     <button id="download">Download calendar (.ics)</button>
@@ -53,13 +54,13 @@ $("process").addEventListener("click",async()=>{
     const response=await fetch("/api/process",{method:"POST",body:data});
     const result=await response.json();if(!response.ok)throw new Error(result.detail||"Processing failed");
     extractedText=result.text||"";const event=result.event||{};
-    for(const id of ["title","event_date","start_time","end_time","venue","description"])$(id).value=event[id]||"";
-    $("editor").hidden=false;$("status").textContent=event.needs_review?"Text extracted. Date/title need your attention. Review all fields.":"Text extracted. Review all fields before downloading.";
+    for(const id of ["title","event_date","start_time","end_time","venue","description","registration_deadline"])$(id).value=event[id]||"";
+    $("editor").hidden=false;const notes=Array.isArray(event.review_notes)?event.review_notes.join(" "):String(event.review_notes||"");$("status").textContent=(event.needs_review?"Review required. ":"Extraction complete. ")+(notes||"Check every field before downloading.");
   }catch(error){$("status").textContent=error.message;}
   finally{$("process").disabled=false;}
 });
 $("download").addEventListener("click",async()=>{
-  const event={title:$("title").value.trim(),event_date:$("event_date").value,start_time:$("start_time").value||null,end_time:$("end_time").value||null,venue:$("venue").value,description:$("description").value};
+  const event={title:$("title").value.trim(),event_date:$("event_date").value,start_time:$("start_time").value||null,end_time:$("end_time").value||null,venue:$("venue").value,description:$("description").value,registration_deadline:$("registration_deadline").value||null};
   if(!event.title||!event.event_date){$("status").textContent="Enter an event title and date.";return;}
   try{
     const response=await fetch("/api/calendar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(event)});
