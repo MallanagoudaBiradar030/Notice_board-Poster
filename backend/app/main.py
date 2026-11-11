@@ -10,7 +10,7 @@ import requests
 from dateutil import parser as date_parser
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -168,7 +168,7 @@ def make_ics(event: CalendarEvent) -> str:
 
 @app.get("/")
 def root():
-    return {"message": "Notice Board Poster to Calendar API", "ui": "/", "docs": "/docs", "health": "/health"}
+    return FileResponse(Path(__file__).parent / "static" / "index.html")
 
 
 @app.get("/health")
