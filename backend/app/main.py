@@ -110,7 +110,7 @@ def extract_event_fields(text: str) -> dict[str, Any]:
             break
 
     deadline_line = next(
-        (line for line in lines if re.search(r"\\b(registration deadline|registration closes|register by|last date to register|last date for registration)\\b", line, re.I)),
+        (line for line in lines if re.search(r"\b(registration deadline|registration closes|register by|last date to register|last date for registration)\\b", line, re.I)),
         "",
     )
     registration_deadline = None
@@ -123,9 +123,9 @@ def extract_event_fields(text: str) -> dict[str, Any]:
             except (ValueError, OverflowError):
                 pass
 
-    event_text = "\\n".join(
+    event_text = "\n".join(
         line for line in lines
-        if not re.search(r"\\b(registration deadline|registration closes|register by|last date to register|last date for registration)\\b", line, re.I)
+        if not re.search(r"\b(registration deadline|registration closes|register by|last date to register|last date for registration)\\b", line, re.I)
     )
     found_date = None
     for pattern in DATE_PATTERNS:
@@ -175,7 +175,7 @@ def make_ics(event: CalendarEvent) -> str:
     uid = f"{uuid4()}@notice-board-poster"
     summary = ics_escape(event.title)
     deadline_note = (
-        f"\\nRegistration deadline: {event.registration_deadline.isoformat()}"
+        f"\nRegistration deadline: {event.registration_deadline.isoformat()}"
         if event.registration_deadline else ""
     )
     description = ics_escape(event.description + deadline_note)
