@@ -147,7 +147,7 @@ OCR TEXT:
     try:
         clean = output.strip()
         if clean.startswith("```"):
-            clean = re.sub(r"^\`\`\`(?:json)?\\s*|\\s*\`\`\`$", "", clean, flags=re.I)
+            clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", clean, flags=re.I)
         event = json.loads(clean)
     except (json.JSONDecodeError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="Foundry agent returned invalid JSON. Check the agent instructions and try again.") from exc
