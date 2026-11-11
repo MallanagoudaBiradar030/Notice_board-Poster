@@ -14,6 +14,8 @@
     button{border:0;border-radius:9px;padding:12px 17px;font:inherit;font-weight:650;cursor:pointer;background:#2459d3;color:white;margin-top:14px}
     button.secondary{background:#e9eef9;color:#20365f;margin-left:8px}.hint,.status{font-size:14px;color:#657187}.status{white-space:pre-wrap;margin-top:12px}
     #editor[hidden]{display:none}.raw{background:#f6f8fc;padding:12px;border-radius:9px;white-space:pre-wrap;max-height:220px;overflow:auto;font-size:13px}
+    .warning{background:#fff7e6;border:1px solid #f2d28a;color:#754d00;padding:11px 13px;border-radius:9px;margin:12px 0;font-size:14px}
+    .events{background:#f6f8fc;padding:12px;border-radius:9px;white-space:pre-wrap;font-size:14px}
     @media(max-width:600px){.grid{grid-template-columns:1fr}.card{padding:16px}}
   </style>
 </head>
@@ -26,24 +28,62 @@
     <button id="process">Extract notice details</button><div id="status" class="status" role="status"></div>
   </section>
   <section id="editor" class="card" hidden>
-    <h2>Review event details</h2><p class="hint">Check every field. OCR and automatic extraction may make mistakes.</p>
+    <h2>Review event details</h2><p class="hint">Check every field. OCR and automatic extraction may make mistakes. Missing fields are never guessed.</p>
+    <div id="missing" class="warning" role="status" hidden></div>
     <label for="title">Event title</label><input id="title" maxlength="200">
     <div class="grid">
       <div><label for="event_date">Date</label><input id="event_date" type="date"></div>
       <div><label for="venue">Venue</label><input id="venue" maxlength="300"></div>
+      <div><label for="registration_deadline">Registration deadline</label><input id="registration_deadline" type="date"></div>
       <div><label for="start_time">Start time</label><input id="start_time" type="time"></div>
       <div><label for="end_time">End time</label><input id="end_time" type="time"></div>
     </div>
     <label for="description">Description</label><textarea id="description" maxlength="5000"></textarea>
-    <button id="download">Download calendar (.ics)</button>
+    <button id="download">Confirm & download calendar (.ics)</button>
     <button id="showText" class="secondary" type="button">Show extracted text</button>
     <pre id="raw" class="raw" hidden></pre>
+    <h3>Saved events on this device</h3>
+    <p class="hint">Events are kept in this browser only. Overlapping events on the same date are flagged before export.</p>
+    <pre id="savedEvents" class="events">No events saved yet.</pre>
   </section>
   <p class="hint">Powered by Azure AI Document Intelligence · Your upload is processed in memory and is not saved by this app.</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 let extractedText="";
+const STORAGE_KEY="notice-board-calendar-events-v1";
+function getSavedEvents(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]");}catch{return [];}}
+function eventWindow(event){
+  if(!event.start_time)return [0,1440];
+  const toMinutes=value=>{const [h,m]=value.split(":").map(Number);return h*60+m;};
+  const start=toMinutes(event.start_time);
+  const end=event.end_time?toMinutes(event.end_time):start+60;
+  return [start,end>start?end:1440];
+}
+function overlaps(a,b){
+  if(a.event_date!==b.event_date)return false;
+  const [as,ae]=eventWindow(a),[bs,be]=eventWindow(b);
+  return as<be&&bs<ae;
+}
+function renderSavedEvents(){
+  const events=getSavedEvents();
+  if(!events.length){$("savedEvents").textContent="No events saved yet.";return;}
+  $("savedEvents").textContent=events.map((event,index)=>{
+    const clashes=events.slice(0,index).some(other=>overlaps(event,other))||
+      events.slice(index+1).some(other=>overlaps(event,other));
+    return (clashes?"⚠ CLASH · ":"✓ ")+event.title+" · "+event.event_date+
+      (event.start_time?" · "+event.start_time+(event.end_time?"–"+event.end_time:""):" · All day")+
+      (event.venue?" · "+event.venue:"");
+  }).join("\\n");
+}
+function saveConfirmedEvent(event){
+  const events=getSavedEvents();
+  const duplicate=events.some(item=>item.title===event.title&&item.event_date===event.event_date&&
+    item.start_time===event.start_time&&item.venue===event.venue);
+  if(!duplicate){events.push(event);localStorage.setItem(STORAGE_KEY,JSON.stringify(events));}
+  renderSavedEvents();
+}
+renderSavedEvents();
 $("process").addEventListener("click",async()=>{
   const file=$("poster").files[0]; if(!file){$("status").textContent="Choose a poster or PDF first.";return;}
   if(file.size>10*1024*1024){$("status").textContent="File is larger than 10 MB.";return;}
@@ -53,20 +93,32 @@ $("process").addEventListener("click",async()=>{
     const response=await fetch("/api/process",{method:"POST",body:data});
     const result=await response.json();if(!response.ok)throw new Error(result.detail||"Processing failed");
     extractedText=result.text||"";const event=result.event||{};
-    for(const id of ["title","event_date","start_time","end_time","venue","description"])$(id).value=event[id]||"";
-    $("editor").hidden=false;$("status").textContent=event.needs_review?"Text extracted. Date/title need your attention. Review all fields.":"Text extracted. Review all fields before downloading.";
+    for(const id of ["title","event_date","start_time","end_time","venue","registration_deadline","description"])$(id).value=event[id]||"";
+    $("editor").hidden=false;
+    const missing=event.missing_fields||[];
+    $("missing").hidden=missing.length===0;
+    $("missing").textContent=missing.length?"Missing or unclear fields: "+missing.join(", ")+". Fill them manually if the poster contains this information.":"No required fields were left blank by the extraction rules. Still verify every value.";
+    $("status").textContent="OCR completed. Review the extracted text and all event details before confirming.";
   }catch(error){$("status").textContent=error.message;}
   finally{$("process").disabled=false;}
 });
 $("download").addEventListener("click",async()=>{
-  const event={title:$("title").value.trim(),event_date:$("event_date").value,start_time:$("start_time").value||null,end_time:$("end_time").value||null,venue:$("venue").value,description:$("description").value};
+  const event={title:$("title").value.trim(),event_date:$("event_date").value,start_time:$("start_time").value||null,end_time:$("end_time").value||null,venue:$("venue").value,registration_deadline:$("registration_deadline").value||null,description:$("description").value};
   if(!event.title||!event.event_date){$("status").textContent="Enter an event title and date.";return;}
+  if(event.registration_deadline&&event.registration_deadline>event.event_date){$("status").textContent="Check the registration deadline: it is after the event date.";return;}
+  const existing=getSavedEvents();
+  const clashes=existing.filter(item=>overlaps(event,item));
+  if(clashes.length){
+    const names=clashes.map(item=>item.title+" ("+item.event_date+")").join(", ");
+    if(!confirm("Possible calendar clash with: "+names+". Download this event anyway?"))return;
+  }
   try{
     const response=await fetch("/api/calendar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(event)});
     if(!response.ok){const error=await response.json();throw new Error(error.detail||"Calendar export failed");}
     const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");
     a.href=url;a.download=(event.title.replace(/[^a-z0-9_-]/gi,"-").slice(0,50)||"notice-event")+".ics";a.click();URL.revokeObjectURL(url);
-    $("status").textContent="Calendar file downloaded. Import it into Google Calendar, Outlook or another calendar app.";
+    saveConfirmedEvent(event);
+    $("status").textContent="Event confirmed and calendar file downloaded. Import it into Google Calendar, Outlook or another calendar app.";
   }catch(error){$("status").textContent=error.message;}
 });
 $("showText").addEventListener("click",()=>{$("raw").hidden=!$("raw").hidden;$("raw").textContent=extractedText;});
