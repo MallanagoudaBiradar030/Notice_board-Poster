@@ -14,5 +14,11 @@ services:
         sync: false
       - key: AZURE_DOCUMENT_INTELLIGENCE_API_VERSION
         value: "2024-11-30"
+      - key: FOUNDRY_PROJECT_ENDPOINT
+        sync: false
+      - key: FOUNDRY_AGENT_NAME
+        value: "chatgpt4mini"
+      - key: FOUNDRY_API_KEY
+        sync: false
       - key: CORS_ORIGINS
         value: "*"
