@@ -126,7 +126,7 @@ OCR TEXT:
         response = requests.post(
             url,
             params={"api-version": "v1"},
-            headers={"api-key": api_key, "Content-Type": "application/json"},
+            headers={"api-key": api_key, "Content-Type": "application/json", "Foundry-Features": "AgentEndpoints=V1Preview"},
             json={"input": instructions, "stream": False},
             timeout=90,
         )
